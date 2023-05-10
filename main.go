@@ -1,38 +1,56 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
-	qrcode "github.com/skip2/go-qrcode"
+	"github.com/gin-gonic/gin"
 )
 
-func generateQRcode(w http.ResponseWriter, r *http.Request) {
-	text := r.FormValue("text")
-	if text == "" {
-		http.Error(w, "Please provide a text parameter", http.StatusBadRequest)
-		return
+type Joke struct {
+	Joke string `json:"joke"`
+}
+
+func fetchRandomJoke() (string, error) {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", "http://icanhazdadjoke.com/", nil)
+	if err != nil {
+		return "", err
 	}
 
-	qr, err := qrcode.New(text, qrcode.Medium)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
-		http.Error(w, "Failed to generate QR code", http.StatusInternalServerError)
-		return
+		return "", err
 	}
-	pngData, err := qr.PNG(256)
+	defer resp.Body.Close()
+
+	var joke Joke
+	err = json.NewDecoder(resp.Body).Decode(&joke)
 	if err != nil {
-		http.Error(w, "Failed to generate QR code", http.StatusInternalServerError)
-		return
+		return "", err
 	}
-	w.Header().Set("Content-type", "image/png")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(pngData)))
-	w.Write(pngData)
+	return joke.Joke, nil
 }
 
 func main() {
-	http.HandleFunc("/generate", generateQRcode)
+	r := gin.Default()
 
-	log.Println("Server started on http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	r.GET("/joke", func(c *gin.Context) {
+		joke, err := fetchRandomJoke()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to fetch joke",
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"joke": joke,
+		})
+	})
+	port := 8080
+	fmt.Printf("Joke Generator API is running on port %d\n", port)
+	r.Run(":8080")
 }
